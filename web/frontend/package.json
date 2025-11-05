@@ -1,0 +1,25 @@
+{
+    "name": "glucose-frontend",
+    "private": true,
+    "version": "0.1.0",
+    "scripts": {
+        "dev": "vite",
+        "build": "vite build",
+        "preview": "vite preview --port 5173"
+    },
+    "dependencies": {
+        "@emotion/react": "^11.14.0",
+        "@emotion/styled": "^11.14.1",
+        "@mui/material": "^5.18.0",
+        "axios": "^1.7.2",
+        "chart.js": "^4.4.1",
+        "react": "^18.2.0",
+        "react-chartjs-2": "^5.2.0",
+        "react-dom": "^18.2.0",
+        "react-router-dom": "^7.9.5"
+    },
+    "devDependencies": {
+        "@vitejs/plugin-react": "^4.2.0",
+        "vite": "^5.0.0"
+    }
+}

@@ -1,0 +1,12 @@
+# Project Python dependencies for the API/rl components
+# Install into the project virtualenv at: D:/innovativeproject/services/.venv
+
+gymnasium
+torch==2.8.0
+numpy
+matplotlib
+fastapi[all]
+pandas
+requests
+scikit-learn
+uvicorn

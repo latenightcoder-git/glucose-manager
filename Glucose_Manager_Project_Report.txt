@@ -1,0 +1,204 @@
+Project report — Glucose Manager / Glucose RL API
+
+Date: 2025-11-04
+
+Scope: local development setup, API surface, current status, changes made, verification steps and recommended next work.
+
+---
+
+1) Executive summary
+This repo contains a FastAPI backend (glucose RL API) and a React + Vite frontend (Glucose Manager). I started both servers, fixed DB seeding and a few frontend auth/UX issues, verified the API and UI flow, and seeded example patients/readings so the app shows meaningful data in dev. The frontend now persists a demo auth token, shows a logout control, and reports API errors (401) clearly.
+
+Status: runnable locally. Backend (uvicorn) is running on port 8000. Frontend (Vite) runs on port 5173. Basic login and patient-list flow confirmed.
+
+---
+
+2) Architecture & components
+
+- Backend
+  - FastAPI application in `api/app`
+  - SQLite DB (glucose.db by default) with simple schema and dev seed
+  - Routers: patients, readings, recommend, train (see endpoints below)
+  - Authentication: demo token format `demo-<username>` implemented in `auth.py` and enforced via `get_current_role()` dependency.
+  - OpenAPI / Swagger available at: http://localhost:8000/docs (when server is running)
+
+- Frontend
+  - React + Vite app in `web/frontend`
+  - Components of interest: `AuthContext`, `ProtectedRoute`, `LoginForm`, `PatientList`, `PatientDetails`, `GlucoseChart` (Chart.js via react-chartjs-2)
+  - Axios instance in `src/api.js` (baseURL `http://localhost:8000`)
+
+---
+
+3) How to run locally
+
+Open two PowerShell terminals.
+
+1. Backend (FastAPI / uvicorn)
+
+cd D:\innovativeproject\services\api\app
+$env:PYTHONPATH = 'D:\innovativeproject\services\api\app'
+python -m uvicorn main:app --reload --port 8000
+
+2. Frontend (Vite)
+
+cd D:\innovativeproject\services\web\frontend
+npm install      # only if dependencies change or on first run
+npm run dev
+# open http://localhost:5173
+
+---
+
+4) Verified endpoints (API surface)
+
+All endpoints (except /api/login) require Authorization header: Authorization: Bearer demo-<username>. CORS allows the frontend origins `http://localhost:5173` and `http://localhost:5174`.
+
+- POST /api/login  
+  - Body: { "username": "<str>", "password": "<str>" }  
+  - Success response JSON: { "token": "demo-<username>", "role": "<role>", "username": "<username>" }  
+  - Auth: none (this is the login endpoint)
+
+- POST /api/patients  
+  - Body: Patient { name, age, sensitivity }  
+  - Response: Patient JSON (with id)  
+  - Auth: requires Authorization; server-side check only allows roles "doctor" or "nurse" to create (throws forbidden otherwise)
+
+- GET /api/patients  
+  - Response: JSON array of Patient objects [{id,name,age,sensitivity}, ...]  
+  - Auth: requires Authorization header; any authenticated role will get the list (no role restriction in code)
+
+- POST /api/readings  
+  - Body: Reading { patient_id, glucose, insulin, carbs, activity, note }  
+  - Response: { "ok": true }  
+  - Auth: requires Authorization header (any authenticated role allowed)
+
+- GET /api/readings/{patient_id}  
+  - Response: JSON array of readings with fields id, glucose, insulin, carbs, activity, ts ordered ASC  
+  - Auth: requires Authorization header (any authenticated role allowed)
+
+- POST /api/recommend  
+  - Body: RecommendationRequest { patient_id, glucose, insulin_on_board, carbs, activity, exercising }  
+  - Response: RecommendationResponse { action_units, reason }  
+  - Behavior: Has simple fuzzy guardrails (e.g., avoid insulin if exercising or low glucose). If RL agent not present, returns heuristic action.  
+  - Auth: requires Authorization header (any authenticated role allowed)
+
+- POST /api/train  
+  - Query param: steps (int) default 50000  
+  - Response: { "started": true }  
+  - Side effects: will run training in a background thread and set `routers.recommend.MODEL["agent"]` when ready  
+  - Auth: requires Authorization header (any authenticated role allowed)
+
+---
+
+5) Data models (from `api/app/schemas.py`)
+
+- Patient: id?, name, age, sensitivity
+- Reading: patient_id, glucose, insulin, carbs (0.0 default), activity (0.0), note?
+- RecommendationRequest: patient_id, glucose, insulin_on_board, carbs, activity, exercising
+- RecommendationResponse: action_units, reason
+
+---
+
+6) Files I changed (changelog — dev improvements)
+
+- Backend:
+  - `api/app/db.py` — added dev seed for `patients` and `readings` if DB is empty so front-end has sample data.
+- Frontend:
+  - `web/frontend/src/auth/AuthContext.jsx` — persist/restore user from localStorage and restore axios Authorization header on load.
+  - `web/frontend/src/components/PatientList.jsx` — added error handling for API calls (alert on 401 and message + logout action).
+  - `web/frontend/src/App.jsx` — added header text with "Signed in as ..." and a Logout button that calls the `logout()` hook.
+
+Note: I did not change backend auth logic beyond seeding data. Tokens remain the simple `demo-<username>` format used by the app.
+
+---
+
+7) Verification performed
+
+- Started backend and frontend with commands above.
+- Executed API smoke tests (Python requests):
+  - POST /api/login with (admin / admin123) returned 200 + token `demo-admin`.
+  - GET /api/patients with that token returned seeded patient array.
+- Confirmed UI: login, patient list, patient details display, and chart render using `GlucoseChart` (Chart.js) fed from readings.
+
+---
+
+8) What the chart shows (implementation details)
+
+- Component: `web/frontend/src/components/GlucoseChart.jsx`
+- Library: Chart.js via `react-chartjs-2`.
+- Input: `readings` array from `/api/readings/{patient_id}`.
+- Labels: `reading.ts` for each reading (timestamps).
+- Data: `reading.glucose` values plotted as single dataset labeled "Glucose".
+- Options: y-axis range fixed min 40 to max 300; legend enabled.
+- Result: the line chart visualizes glucose over time for a patient. Improving timestamp formatting and responsive behavior is a recommended polish.
+
+---
+
+9) Known issues & limitations
+
+- Authentication & security:
+  - Passwords are stored in plaintext in the SQLite DB (dev only). Tokens are non-secure (`demo-<username>`). Not suitable for production.
+- Role restrictions:
+  - Some server-side endpoint restrictions exist (example: creation of patients requires doctor/nurse), but many endpoints accept any authenticated role — adjust as needed.
+- No automated tests currently present.
+- Frontend styling is minimal and can be improved (spacing/UX).
+- Vite deprecation warning (CJS build of Vite Node API) is informational for dev but not blocking.
+
+---
+
+10) Recommended next steps (prioritized)
+
+High priority
+1. Add proper auth (hashed passwords + JWT) if planning to go beyond local dev.
+2. Add an axios interceptor to automatically log out on 401 and redirect to login (UX + security).
+3. Add unit/integration tests for backend endpoints (pytest) and frontend critical flows (Jest/React Testing Library).
+
+Medium priority
+4. Implement admin-only user management UI to add doctor/nurse/patient/family accounts.
+5. Improve chart: format timestamps, make responsive, add multiple datasets (prediction vs actual).
+6. Add role-based UI so doctors/nurses see appropriate actions and patients see a simpler view.
+
+Lower priority
+7. Containerize with Docker for consistent dev/prod parity.
+8. CI pipeline to run linters and tests.
+
+---
+
+11) Quick recipes & snippets
+
+- Login (curl)
+
+curl -X POST http://localhost:8000/api/login \
+  -H "Content-Type: application/json" \
+  -d '{"username":"admin","password":"admin123"}'
+
+- Use returned token to list patients (bash)
+
+curl -H "Authorization: Bearer demo-admin" http://localhost:8000/api/patients
+
+- Add dev users (Python snippet)
+
+Run from `api/app` folder (PowerShell):
+
+python - <<'PY'
+import sqlite3
+db='glucose.db'
+con=sqlite3.connect(db); cur=con.cursor()
+users=[('dr_jones','docpass','doctor'),('nurse_amy','nursepass','nurse'),('patient_al','patientpass','patient')]
+for u,p,r in users:
+    try:
+        cur.execute("INSERT INTO users (username,password,role) VALUES (?,?,?)", (u,p,r))
+    except:
+        pass
+con.commit(); con.close()
+print('done')
+PY
+
+---
+
+12) Appendix — Suggested immediate implementation I can do for you now
+
+- (A) Implement axios interceptor to clear local auth and redirect to login when any response is 401.
+- (B) Add a small admin-only "Create user" form in the frontend and a POST endpoint (admin-only) to insert users into DB (dev mode).
+- (C) Improve chart to format `ts` as readable dates on x-axis and make chart container responsive.
+
+Tell me which one you want next (A, B, C, or multiple) and I’ll implement it and verify locally.
